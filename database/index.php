@@ -1,12 +1,28 @@
 <?php
-// Database connection parameters
-$host = 'localhost';
-$db   = 'Stor_management';
-$user = 'root';
-$pass = '';
-$charset = 'utf8mb4';
-
-$dsn = "mysql:host=$host;charset=$charset";
+/*
+ * This script handles the initial setup of the database and tables.
+ * It's designed to be run once.
+ */
+?>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>System Installation</title>
+    <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
+    <style>
+        body { background-color: #f8f9fa; padding-top: 40px; padding-bottom: 40px; }
+    </style>
+</head>
+<body>
+<div class="container">
+    <div class="card shadow-lg">
+        <div class="card-header bg-primary text-white text-center">
+            <h2>System Installation & Setup</h2>
+        </div>
+        <div class="card-body">
+<?php
+// Database connection parameters are now inside the main block
 $options = [
     PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
     PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
@@ -14,12 +30,19 @@ $options = [
 ];
 
 try {
+    $host = 'localhost';
+    $db   = 'Stor_management';
+    $user = 'root';
+    $pass = '';
+    $charset = 'utf8mb4';
+
     // 1. Connect to MySQL (without database)
+    $dsn = "mysql:host=$host;charset=$charset";
     $pdo = new PDO($dsn, $user, $pass, $options);
 
     // 2. Create database if not exists
     $pdo->exec("CREATE DATABASE IF NOT EXISTS `$db` CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci");
-    echo "Database '$db' created or already exists.<br>";
+    echo '<div class="alert alert-success">Database \''.htmlspecialchars($db).'\' created or already exists.</div>';
 
     // 3. Connect to the new database
     $pdo->exec("USE `$db`");
@@ -110,12 +133,16 @@ try {
 
     CREATE TABLE IF NOT EXISTS imports (
         id INT AUTO_INCREMENT PRIMARY KEY,
+        store_id INT NOT NULL,
         category_id INT NOT NULL,
         product_id INT NOT NULL,
         quantity INT DEFAULT 0,
         supplier_name VARCHAR(255),
         description TEXT,
         import_date DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (store_id) REFERENCES stores(id)
+            ON UPDATE CASCADE
+            ON DELETE CASCADE,
         FOREIGN KEY (product_id) REFERENCES products(id)
             ON UPDATE CASCADE
             ON DELETE CASCADE,
@@ -126,12 +153,16 @@ try {
 
     CREATE TABLE IF NOT EXISTS exports (
         id INT AUTO_INCREMENT PRIMARY KEY,
+        store_id INT NOT NULL,
         category_id INT NOT NULL,
         product_id INT NOT NULL,
         quantity INT DEFAULT 0,
         customer_name VARCHAR(255),
         description TEXT,
         export_date DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (store_id) REFERENCES stores(id)
+            ON UPDATE CASCADE
+            ON DELETE CASCADE,
         FOREIGN KEY (product_id) REFERENCES products(id)
             ON UPDATE CASCADE
             ON DELETE CASCADE,
@@ -173,14 +204,37 @@ try {
     ";
 
     $pdo->exec($sql);
-    echo "All tables created successfully.<br>";
+    echo '<div class="alert alert-success">All tables created successfully.</div>';
 
-    // 6. Insert default admin role and user
+    // --- Schema Updates ---
+    // Add store_id to imports table if it doesn't exist, to fix errors on existing installations.
+    $checkColumn = $pdo->query("SHOW COLUMNS FROM `imports` LIKE 'store_id'");
+    if ($checkColumn->rowCount() == 0) {
+        $pdo->exec("ALTER TABLE `imports` ADD COLUMN `store_id` INT NOT NULL AFTER `id`, ADD FOREIGN KEY (`store_id`) REFERENCES `stores`(`id`) ON UPDATE CASCADE ON DELETE CASCADE;");
+        echo '<div class="alert alert-info">Updated `imports` table to include `store_id`.</div>';
+    }
+
+    // Add store_id to exports table if it doesn't exist, to fix errors on existing installations.
+    $checkColumnExports = $pdo->query("SHOW COLUMNS FROM `exports` LIKE 'store_id'");
+    if ($checkColumnExports->rowCount() == 0) {
+        $pdo->exec("ALTER TABLE `exports` ADD COLUMN `store_id` INT NOT NULL AFTER `id`, ADD FOREIGN KEY (`store_id`) REFERENCES `stores`(`id`) ON UPDATE CASCADE ON DELETE CASCADE;");
+        echo '<div class="alert alert-info">Updated `exports` table to include `store_id`.</div>';
+    }
+
+    // --- End Schema Updates ---
+
+    // 6. Insert default roles and users
     $pdo->exec("INSERT IGNORE INTO roles (id, name, description) VALUES (1, 'Admin', 'Full system access')");
+    $pdo->exec("INSERT IGNORE INTO roles (id, name, description) VALUES (2, 'Manager', 'Manages inventory and staff')");
+    $pdo->exec("INSERT IGNORE INTO roles (id, name, description) VALUES (3, 'Worker', 'Handles day-to-day inventory tasks')");
+    echo '<div class="alert alert-info">Default roles (Admin, Manager, Worker) created.</div>';
     
-    $adminPassword = password_hash('4321', PASSWORD_DEFAULT);
+    // Prepare statement for inserting users
     $stmt = $pdo->prepare("INSERT IGNORE INTO users (username, password_hash, full_name, role_id, phone, status) 
                            VALUES (:username, :password, :full_name, :role_id, :phone, :status)");
+
+    // Insert Admin user
+    $adminPassword = password_hash('admin123', PASSWORD_DEFAULT); // Set a secure password
     $stmt->execute([
         ':username' => 'admin',
         ':password' => $adminPassword,
@@ -190,12 +244,55 @@ try {
         ':status' => 'Active'
     ]);
 
-    echo "Default admin user created (username: <b>admin</b>, password: <b>admin123</b>).<br>";
-    echo "<b>Installation completed successfully!</b>";
+    // Insert Manager user
+    $managerPassword = password_hash('manager123', PASSWORD_DEFAULT); // Set a secure password
+    $stmt->execute([
+        ':username' => 'manager',
+        ':password' => $managerPassword,
+        ':full_name' => 'Inventory Manager',
+        ':role_id' => 2,
+        ':phone' => '1111111111',
+        ':status' => 'Active'
+    ]);
+
+    // Insert Worker user
+    $workerPassword = password_hash('worker123', PASSWORD_DEFAULT); // Set a secure password
+    $stmt->execute([
+        ':username' => 'worker',
+        ':password' => $workerPassword,
+        ':full_name' => 'Warehouse Worker',
+        ':role_id' => 3,
+        ':phone' => '2222222222',
+        ':status' => 'Active'
+    ]);
+
+    // 7. Insert default settings row
+    $pdo->exec("INSERT IGNORE INTO settings (id) VALUES (1)");
+
+    echo '<div class="alert alert-info">Default users created.</div>';
+    ?>
+    <div class="alert alert-warning">
+        <h4 class="alert-heading">Default User Credentials</h4>
+        <p>Please use the following credentials to log in. It is highly recommended to change these passwords after your first login.</p>
+        <hr>
+        <ul class="list-unstyled">
+            <li><strong>Admin:</strong> username: <code>admin</code>, password: <code>admin123</code></li>
+            <li><strong>Manager:</strong> username: <code>manager</code>, password: <code>manager123</code></li>
+            <li><strong>Worker:</strong> username: <code>worker</code>, password: <code>worker123</code></li>
+        </ul>
+    </div>
+    <div class="alert alert-success text-center">
+        <h4>Installation Completed Successfully!</h4>
+        <a href="../index.php" class="btn btn-primary mt-2">Go to Welcome Page</a>
+    </div>
+    <?php
 
 } catch (PDOException $e) {
-    die("Database error: " . $e->getMessage());
+    echo '<div class="alert alert-danger"><h4>Installation Failed!</h4><p>A database error occurred: ' . htmlspecialchars($e->getMessage()) . '</p></div>';
 }
 ?>
-
-
+        </div>
+    </div>
+</div>
+</body>
+</html>

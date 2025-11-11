@@ -1,0 +1,21 @@
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+
+    # Set the base directory for the rewrite rules.
+    # This is important for projects in subdirectories.
+    RewriteBase /B2-ceramic/
+
+    # 1. Externally redirect direct requests for .php files to the clean URL
+    # Example: /view/users.php -> /view/users
+    RewriteCond %{THE_REQUEST} \s/+(.+?)\.php[\s?] [NC]
+    RewriteRule ^(.+)\.php$ $1 [R=301,L]
+
+    # 2. Internally rewrite the clean URL to the .php file
+    # Example: /view/users -> /view/users.php
+    # This happens on the server, so the user doesn't see it.
+    RewriteCond %{REQUEST_FILENAME} !-f
+    RewriteCond %{REQUEST_FILENAME} !-d
+    RewriteCond %{REQUEST_FILENAME}.php -f
+    RewriteRule ^(.*)$ $1.php [L]
+
+</IfModule>
